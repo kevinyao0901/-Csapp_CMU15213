@@ -1,5 +1,8 @@
 Data lab01 is mainly about bitwise operations and how data(eg.int and float) are stored in the computer.
-********************************************************
+main code is in datalab-handout/bits.c 
+you can find the comment and explanation about how to solve these puzzles in the experiment_report file.
+If there are better ways to solve these problems,you're welcome to comment under the repository and share your ideas.
+***********************************************************************************************************************
 to check your work,use the following instructions:
 Autograding your work
 We have included some autograding tools in the handout directory — btest, dlc, and driver.pl —
