@@ -227,10 +227,12 @@ int conditional(int x, int y, int z) {
  *   Rating: 3
  */
 int isLessOrEqual(int x, int y) {
+  int signdif=(!(x>>31))^(!(y>>31));
+  int difsig=signdif&(x>>31);
   int a=~(x)+1;
   int sum=y+a;
   int mostsig=sum>>31;
-  return !mostsig;
+  return (!mostsig) | difsig;
 }
 //4
 /* 
