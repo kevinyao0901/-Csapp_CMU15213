@@ -1,0 +1,638 @@
+<font size="1">
+
+# CSAPP Lab2 bomblab详解
+
+## phase_1
+### 思路：
+首先题目要求输入一个字符串，若与phase_1内置的字符串相等则不会爆炸
+在262f中标明了具体内置字符串的储存地址，打印出地址中所存的内容后输入即可。
+汇编如下：
+
+```
+    2627:	f3 0f 1e fa          	endbr64    
+    262b:	48 83 ec 08          	sub    $0x8,%rsp
+    262f:	48 8d 35 1a 1b 00 00 	lea    0x1b1a(%rip),%rsi 
+    # 4150 <_IO_stdin_used+0x150>  //加载(%rip)+0x1b1a地址中的值    
+    2636:	e8 23 05 00 00       	call   2b5e <strings_not_equal>    
+    263b:	85 c0                	test   %eax,%eax    
+    263d:	75 05                	jne    2644 <phase_1+0x1d> //不能跳！！！    
+    //输入与0x4150中相等则不会跳转，查看0x4150中存放的是字符串There are rumors on the internets.    
+    263f:	48 83 c4 08          	add    $0x8,%rsp  
+    2643:	c3                   	ret        
+    2644:	e8 04 08 00 00       	call   2e4d <explode_bomb>    
+    2649:	eb f4                	jmp    263f <phase_1+0x18>    
+```
+```
+~~~~~~~~~~~~~~~~~~~~~~~~~
+aws=There are rumors on the internets.
+~~~~~~~~~~~~~~~~~~~~~~~~~
+```
+    
+    
+    
+    
+
+## phase_2
+### 思路：
+用x/s打印第2668发现题目要求输入六个数，后与phase_2中计算的数逐个比较，相等则不会爆炸
+否则爆炸，具体计算方法在2692，依次取出输入的数与每一次循环计算的结果比较，全部相同即
+可通过本题。
+根据后续Lable1循环中规律可以正确得出这六个数，下一个数=上一个数+index，因为题目仅要求
+第一个数大于0即可，故试取1，可以使用 1 或任何其他非负整数作为第一个整数，只要满足接下来
+的 5 个整数按照一定的规律递增即可。例如，可以使用1为第一个数作为输入，输入1 2 4 7 11 16
+按照这个输入，函数 phase_2 不会调用 explode_bomb，因为接下来的 5 个整数满足
+第i个整数=i+第i-1个整数    的规律，即 2=1+1, 4=2+2, 7=3+4, 11=4+7, 16=5+11。输入这个数列
+即可。汇编如下：
+```
+000000000000264b <phase_2>:
+    264b:	f3 0f 1e fa          	endbr64 
+    264f:	55                   	push   %rbp
+    2650:	53                   	push   %rbx
+
+    2651:	48 83 ec 28          	sub    $0x28,%rsp
+    2655:	64 48 8b 04 25 28 00 	mov    %fs:0x28,%rax
+    265c:	00 00 
+    265e:	48 89 44 24 18       	mov    %rax,0x18(%rsp)
+    2663:	31 c0                	xor    %eax,%eax                //%eax置零
+    2665:	48 89 e6             	mov    %rsp,%rsi                //将%rsp设为第二个参数
+    2668:	e8 22 08 00 00       	call   2e8f <read_six_numbers>  //输入六个数字
+
+
+    266d:	83 3c 24 00          	cmpl   $0x0,(%rsp)   
+    2671:	78 0a                	js     267d <phase_2+0x32> // 不能跳！！！ 所以第一个输入必须大于0
+************
+    2673:	48 89 e5             	mov    %rsp,%rbp          //%rbp=%rsp，均为输入数组的首地址
+    2676:	bb 01 00 00 00       	mov    $0x1,%ebx         //赋值语句，%ebx=1
+    267b:	eb 13                	jmp    2690 <phase_2+0x45>   -> Lable1# do while循环
+
+    267d:	e8 cb 07 00 00       	call   2e4d <explode_bomb>
+    2682:	eb ef                	jmp    2673 <phase_2+0x28> // 循环
+
+************
+Lable2#:
+循环六次 %ebx每次加一，%rbp每次加四，向后移一个双字（int）
+    2684:	83 c3 01             	add    $0x1,%ebx   // %ebx+=1 每次加一，可以被理解为index
+    2687:	48 83 c5 04          	add    $0x4,%rbp   // %rbp+=4  下一个数 
+    268b:	83 fb 06             	cmp    $0x6,%ebx   
+    268e:	74 11                	je     26a1 <phase_2+0x56>  // jump if %ebx==6 to end#
+
+********
+Lable1#:
+%rbp=%rsp，均为输入数组的首地址    前面的赋值语句使得%ebx=1
+    2690:	89 d8                	mov    %ebx,%eax         //%eax=%ebx
+    2692:	03 45 00             	add    0x0(%rbp),%eax    //%eax+=(%rbp)  下一个数=上一个数+index
+    2695:	39 45 04             	cmp    %eax,0x4(%rbp)     // %eax ? (%rbp)+4（下一个数）若输入的第i个数和函数自己计算的第i个数相等则不会跳转爆炸
+    2698:	74 ea                	je     2684 <phase_2+0x39>  //->jump Lable2#  循环
+
+    269a:	e8 ae 07 00 00       	call   2e4d <explode_bomb>    若输入的第i个数和内置函数计算的第i个数不相等则会跳转爆炸
+    269f:	eb e3                	jmp    2684 <phase_2+0x39>
+
+************
+
+end#:
+    26a1:	48 8b 44 24 18       	mov    0x18(%rsp),%rax
+    26a6:	64 48 2b 04 25 28 00 	sub    %fs:0x28,%rax
+    26ad:	00 00 
+    26af:	75 07                	jne    26b8 <phase_2+0x6d>
+
+
+    26b1:	48 83 c4 28          	add    $0x28,%rsp
+    26b5:	5b                   	pop    %rbx
+    26b6:	5d                   	pop    %rbp
+    26b7:	c3                   	ret    
+    26b8:	e8 c3 fb ff ff       	call   2280 <__stack_chk_fail@plt>
+```
+```
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+aws=1 2 4 7 11 16
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+```
+
+
+## phase_3
+### 思路：
+本题考察类似switch case语句，由26ce可知需要输入两个数，读后续汇编发现根据不同的第一个输入要求第二个输入对应不同的数
+要求与函数内置的index和与该index对应case的值相等，否则爆炸，看到2713开始有一连串计算，并且2761开始有多个类似结构，且最终都
+跳转到2713的后续计算，因此猜测2761开始为不同的case，2713为具体计算对应case的值，后续根据打印的跳转地址发现第一个输入为0时
+不跳转到2761，直接计算，输入为1以及大于1小于等于7的数时跳转到后续case并计算，验证了猜想。故输入合理的case和对应的值即可。汇编如下：
+```
+00000000000026bd <phase_3>:
+    26bd:	f3 0f 1e fa          	endbr64 
+    26c1:	48 83 ec 18          	sub    $0x18,%rsp
+    26c5:	64 48 8b 04 25 28 00 	mov    %fs:0x28,%rax
+    26cc:	00 00 
+    26ce:	48 89 44 24 08       	mov    %rax,0x8(%rsp)             //开了2个int的大小，故有两个输入
+    26d3:	31 c0                	xor    %eax,%eax                  //%eax置零
+    26d5:	48 8d 4c 24 04       	lea    0x4(%rsp),%rcx                                  //第二个字符放到%rcx
+    26da:	48 89 e2             	mov    %rsp,%rdx                                       //%rdx=%rsp
+    26dd:	48 8d 35 41 1d 00 00 	lea    0x1d41(%rip),%rsi        # 4425 <array.0+0x265> //输入为“%d %d”  
+~~~~~~~~~~~~~~
+(gdb) x/s 0x4425
+0x4425: "%d %d"
+~~~~~~~~~~~~~~
+    26e4:	e8 47 fc ff ff       	call   2330 <__isoc99_sscanf@plt> //函数将返回成功赋值的字段个数
+    26e9:	83 f8 01             	cmp    $0x1,%eax
+    26ec:	7e 1e                	jle    270c <phase_3+0x4f>   //不能跳！！！所以%eax-1>0 即%eax>1
+
+********************************
+    26ee:	83 3c 24 07          	cmpl   $0x7,(%rsp)           //不能跳！！！ （%rsp）<=7 第一个数小于等于7 故有0，1，2，3，4，5，6，7可作为index输入
+    26f2:	0f 87 9a 00 00 00    	ja     2792 <phase_3+0xd5>
+
+    26f8:	8b 04 24             	mov    (%rsp),%eax           //%eax=(%rsp)  %eax放第一个输入值（%rax）
+    26fb:	48 8d 15 9e 1a 00 00 	lea    0x1a9e(%rip),%rdx        # 41a0 <_IO_stdin_used+0x1a0>   %rdx=0x41a0 
+    2702:	48 63 04 82          	movslq (%rdx,%rax,4),%rax    //M[4*%rax+%rdx]做符号扩展到8字节存到%rax  %rax=M[4*rax+0x41a0]=0xffffe573
+    2706:	48 01 d0             	add    %rdx,%rax             //%rax=%rdx+%rax  （%rax+=0x41a0即%rax=M[4*rax+0x41a0]+0x41a0)
+~~~~~~~~~~~~~~~~~~~~~~
+注：
+这里用来计算跳转地址
+若输入第一个数为0则
+(gdb) x/x 0x41a0
+0x41a0: 0xffffe573
+(gdb) x/x 0xffffe573+0x41a0
+0x2713 <phase_3+86>:    0x000354b8
+跳转到2713（直接计算）
+若输入第一个数为1则：
+(gdb) x/x 0x41a0+0x4
+0x41a4: 0xffffe5c1
+(gdb) x/x 0xffffe5c1+0x41a0
+0x2761 <phase_3+164>:   0x000000b8
+跳转到2761（进入case，跳转后计算）
+~~~~~~~~~~~~~~~~~~~~~~
+    2709:	3e ff e0             	notrack jmp *%rax            //跳转到%rax寄存器所指的位置,结合26fb,2702,2706和 #41a0 <_IO_stdin_used+0x1a0>可以推测%rax中存了scanf的参数，即index
+    270c:	e8 3c 07 00 00       	call   2e4d <explode_bomb>
+    2711:	eb db                	jmp    26ee <phase_3+0x31>   //循环
+********************************
+
+    2713:	b8 54 03 00 00       	mov    $0x354,%eax          //%eax=0x354
+    2718:	2d 87 01 00 00       	sub    $0x187,%eax          //%eax-=0x187    
+    271d:	05 29 02 00 00       	add    $0x229,%eax          //%eax+=0x229
+    2722:	2d 0c 01 00 00       	sub    $0x10c,%eax          ...
+    2727:	05 0c 01 00 00       	add    $0x10c,%eax
+    272c:	2d 0c 01 00 00       	sub    $0x10c,%eax
+    2731:	05 0c 01 00 00       	add    $0x10c,%eax
+    2736:	2d 0c 01 00 00       	sub    $0x10c,%eax
+
+    273b:	83 3c 24 05          	cmpl   $0x5,(%rsp)             //(%rsp)<=5 //第一个参数小于5
+    273f:	7f 06                	jg     2747 <phase_3+0x8a>    // 不能跳！！！ 所以(%rsp)<=5 第一个数小于等于5
+
+    2741:	39 44 24 04          	cmp    %eax,0x4(%rsp)       %eax和第二个数比
+    2745:	74 05                	je     274c <phase_3+0x8f>  //second==%eax
+    2747:	e8 01 07 00 00       	call   2e4d <explode_bomb>
+    274c:	48 8b 44 24 08       	mov    0x8(%rsp),%rax       
+    2751:	64 48 2b 04 25 28 00 	sub    %fs:0x28,%rax
+    2758:	00 00 
+    275a:	75 42                	jne    279e <phase_3+0xe1>   //不能跳！！！
+    275c:	48 83 c4 18          	add    $0x18,%rsp
+    2760:	c3                   	ret    
+**********************************************
+case1
+    2761:	b8 00 00 00 00       	mov    $0x0,%eax         //将%eax置零，后续同理
+    2766:	eb b0                	jmp    2718 <phase_3+0x5b>   //跳转到某一种情况的case
+**************
+case2
+    2768:	b8 00 00 00 00       	mov    $0x0,%eax
+    276d:	eb ae                	jmp    271d <phase_3+0x60>
+**************
+case3
+    276f:	b8 00 00 00 00       	mov    $0x0,%eax
+    2774:	eb ac                	jmp    2722 <phase_3+0x65>
+**************
+case4
+    2776:	b8 00 00 00 00       	mov    $0x0,%eax
+    277b:	eb aa                	jmp    2727 <phase_3+0x6a>
+**************
+case5
+    277d:	b8 00 00 00 00       	mov    $0x0,%eax
+    2782:	eb a8                	jmp    272c <phase_3+0x6f>
+**************
+case6
+    2784:	b8 00 00 00 00       	mov    $0x0,%eax
+    2789:	eb a6                	jmp    2731 <phase_3+0x74>
+**************
+case7
+    278b:	b8 00 00 00 00       	mov    $0x0,%eax
+    2790:	eb a4                	jmp    2736 <phase_3+0x79>
+    2792:	e8 b6 06 00 00       	call   2e4d <explode_bomb>
+**************
+case8
+    2797:	b8 00 00 00 00       	mov    $0x0,%eax
+    279c:	eb 9d                	jmp    273b <phase_3+0x7e>
+**************
+    279e:	e8 dd fa ff ff       	call   2280 <__stack_chk_fail@plt>
+```
+```
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+aws=0 746
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+```
+    
+    
+    
+    
+
+## phase_4    
+### 思路：    
+首先打印输入，发现要求输入两个数，且280a要求第一个数必须小于等于14
+然后将第一个输入传入函数func4（）中，根据2827发现调用函数func4后，
+返回值必须为37，否则爆炸，根据282c发现第二个输入必须也是37，现在再
+看func4（）的具体内容，这个函数需要3个参数，分别是14，0和第一个输入x
+观察func4（）函数体发现该函数内包含多次计算，试着改写成如下python代码：
+```
+python版fun4():
+def fun(edx,esi,edi):
+	eax=edx
+	eax=eax-esi
+	ebx=eax
+	ebx=ebx>>31
+	ebx=eax+ebx
+	ebx=ebx>>1
+	ebx=ebx+esi
+	if(ebx>edi):
+		edx=ebx-1
+		eax=fun(edx,esi,edi)
+		ebx+=eax
+		eax=ebx
+		return eax
+	if(ebx<edi):
+		esi=ebx+1
+		eax=fun(edx,esi,edi)
+		ebx+=eax
+		eax=ebx
+		return eax
+	if(ebx==edi):
+		eax=ebx
+		return eax
+
+for edi in range(0,15):
+	print(edi,"=",fun(14,0,edi))
+
+运行结果：
+0 = 11
+1 = 11
+2 = 13
+3 = 10
+4 = 19
+5 = 15
+6 = 21
+7 = 7
+8 = 35
+9 = 27
+10 = 37
+11 = 18
+12 = 43
+13 = 31
+14 = 45
+发现只有在第一个输入x=10时才符合要求，故输入10 37即可。
+
+%edx=0xe  %esi=0x0  %edi=x
+00000000000027a3 <func4>:
+    27a3:	f3 0f 1e fa          	endbr64 
+    27a7:	53                   	push   %rbx
+    27a8:	89 d0                	mov    %edx,%eax
+    27aa:	29 f0                	sub    %esi,%eax
+    27ac:	89 c3                	mov    %eax,%ebx
+    27ae:	c1 eb 1f             	shr    $0x1f,%ebx
+    27b1:	01 c3                	add    %eax,%ebx
+    27b3:	d1 fb                	sar    %ebx
+    27b5:	01 f3                	add    %esi,%ebx
+    27b7:	39 fb                	cmp    %edi,%ebx
+    27b9:	7f 06                	jg     27c1 <func4+0x1e>
+    27bb:	7c 10                	jl     27cd <func4+0x2a>
+    27bd:	89 d8                	mov    %ebx,%eax
+    27bf:	5b                   	pop    %rbx
+    27c0:	c3                   	ret    
+    27c1:	8d 53 ff             	lea    -0x1(%rbx),%edx
+    27c4:	e8 da ff ff ff       	call   27a3 <func4>
+    27c9:	01 c3                	add    %eax,%ebx
+    27cb:	eb f0                	jmp    27bd <func4+0x1a>
+    27cd:	8d 73 01             	lea    0x1(%rbx),%esi
+    27d0:	e8 ce ff ff ff       	call   27a3 <func4>
+    27d5:	01 c3                	add    %eax,%ebx
+    27d7:	eb e4                	jmp    27bd <func4+0x1a>
+
+00000000000027d9 <phase_4>:
+    27d9:	f3 0f 1e fa          	endbr64 
+    27dd:	48 83 ec 18          	sub    $0x18,%rsp
+    27e1:	64 48 8b 04 25 28 00 	mov    %fs:0x28,%rax
+    27e8:	00 00 
+    27ea:	48 89 44 24 08       	mov    %rax,0x8(%rsp)
+    27ef:	31 c0                	xor    %eax,%eax
+    27f1:	48 8d 4c 24 04       	lea    0x4(%rsp),%rcx
+    27f6:	48 89 e2             	mov    %rsp,%rdx
+    27f9:	48 8d 35 25 1c 00 00 	lea    0x1c25(%rip),%rsi        # 4425 <array.0+0x265>
+    2800:	e8 2b fb ff ff       	call   2330 <__isoc99_sscanf@plt>
+    2805:	83 f8 02             	cmp    $0x2,%eax
+    2808:	75 06                	jne    2810 <phase_4+0x37>  //必须输入两个数x,y
+    280a:	83 3c 24 0e          	cmpl   $0xe,(%rsp)         //第一个数必须小于或等于14
+    280e:	76 05                	jbe    2815 <phase_4+0x3c>
+    2810:	e8 38 06 00 00       	call   2e4d <explode_bomb>
+    2815:	ba 0e 00 00 00       	mov    $0xe,%edx          //%edx=0xe
+    281a:	be 00 00 00 00       	mov    $0x0,%esi          //%esi=0x0
+    281f:	8b 3c 24             	mov    (%rsp),%edi        //%edi=x
+    2822:	e8 7c ff ff ff       	call   27a3 <func4> //调用函数 func4()
+
+    2827:	83 f8 25             	cmp    $0x25,%eax       //func4()返回值必须是37
+    282a:	75 07                	jne    2833 <phase_4+0x5a>
+    282c:	83 7c 24 04 25       	cmpl   $0x25,0x4(%rsp)  //第二个数必须是37
+    2831:	74 05                	je     2838 <phase_4+0x5f>
+    2833:	e8 15 06 00 00       	call   2e4d <explode_bomb>
+    2838:	48 8b 44 24 08       	mov    0x8(%rsp),%rax
+    283d:	64 48 2b 04 25 28 00 	sub    %fs:0x28,%rax
+    2844:	00 00 
+    2846:	75 05                	jne    284d <phase_4+0x74>
+    2848:	48 83 c4 18          	add    $0x18,%rsp
+    284c:	c3                   	ret    
+    284d:	e8 2e fa ff ff       	call   2280 <__stack_chk_fail@plt>
+```
+```
+~~~~~~~~~~~~~~~~~~~~~~
+aws=10 37
+~~~~~~~~~~~~~~~~~~~~~~
+```
+
+
+
+## phase_5
+### 思路：
+首先还是先打印输入，看到2881发现输入为两个数，2889到288c对第一个输入进行了限制
+即first%16!=15，现在假设输入的第一个数就是15，然后将`41c0 <array.0>`加载到%rsi中，
+打印发现这个地址附近是一张数表，如下：
+```
+（gdb) x/64x 0x41c0 
+0x41c0 <array.0>:       0x0000000a      0x00000002      0x0000000e      0x00000007
+0x41d0 <array.0+16>:    0x00000008      0x0000000c      0x0000000f      0x0000000b
+0x41e0 <array.0+32>:    0x00000000      0x00000004      0x00000001      0x0000000d
+0x41f0 <array.0+48>:    0x00000003      0x00000009      0x00000006      0x00000005
+```
+往下看发现接下来几行取出了数表中的一个值，观察28b8发现%edx为计数器，这里需要循环15次
+并且通过循环建立了一个16个数字之间的互相映射，以输入的数为index，将下一个输入设置为
+arr[index]进行15次循环，由于循环过程复杂，
+这里同样将汇编翻译为python代码
+```
+python版映射
+def fun(rsi,ecx,edx,eax):
+	edx+=1
+	eax=arr[rsi+eax]
+	ecx+=eax
+	if(eax==15):
+		return [edx,ecx]
+	else:
+		return fun(rsi,ecx,edx,eax)
+
+ecx=0
+edx=0
+rsi=0
+eax=5
+arr=[10,2,14,7,8,12,15,11,0,4,1,13,3,9,6,5]
+print("[edx,ecx]=",fun(rsi,ecx,edx,eax))
+
+运行结果：
+[edx,ecx]= [15, 115]
+```
+后续汇编将输入的第二个数与函数运行结果比较，若不相等则爆炸
+故输入15 115即可。
+```
+0000000000002852 <phase_5>:
+    2852:	f3 0f 1e fa          	endbr64 
+    2856:	48 83 ec 18          	sub    $0x18,%rsp
+    285a:	64 48 8b 04 25 28 00 	mov    %fs:0x28,%rax
+    2861:	00 00 
+    2863:	48 89 44 24 08       	mov    %rax,0x8(%rsp)    
+    2868:	31 c0                	xor    %eax,%eax
+    286a:	48 8d 4c 24 04       	lea    0x4(%rsp),%rcx
+    286f:	48 89 e2             	mov    %rsp,%rdx
+    2872:	48 8d 35 ac 1b 00 00 	lea    0x1bac(%rip),%rsi        # 4425 <array.0+0x265>
+    2879:	e8 b2 fa ff ff       	call   2330 <__isoc99_sscanf@plt>
+    287e:	83 f8 01             	cmp    $0x1,%eax
+    2881:	7e 5a                	jle    28dd <phase_5+0x8b>  //不能跳！！！！ 输入必须为两个数
+    2883:	8b 04 24             	mov    (%rsp),%eax   //第一个数放到%eax
+    2886:	83 e0 0f             	and    $0xf,%eax     
+    2889:	89 04 24             	mov    %eax,(%rsp)   //取%eax的后四位即第一个数的后四位
+
+    288c:	83 f8 0f             	cmp    $0xf,%eax     //不能跳！！！！！所以 first后四位不全为1  first%16!=15
+    288f:	74 32                	je     28c3 <phase_5+0x71>
+
+    2891:	b9 00 00 00 00       	mov    $0x0,%ecx    //%ecx=0
+    2896:	ba 00 00 00 00       	mov    $0x0,%edx    //%edx=0
+    289b:	48 8d 35 1e 19 00 00 	lea    0x191e(%rip),%rsi        # 41c0 <array.0>   //%rsi=0x41c0
+*********************
+%rax 现在是first的后四位
+以下循环建立了一个16个数字之间的互相映射，以输入的数为index，将下一个输入设置为arr[index]
+并进行15次循环
+    28a2:	83 c2 01             	add    $0x1,%edx               //%edx+=1 计数器？
+    28a5:	48 98                	cltq                           //把%eax扩展到%rax
+    28a7:	8b 04 86             	mov    (%rsi,%rax,4),%eax          // %eax=M[4*%rax+%rsi]
+    28aa:	01 c1                	add    %eax,%ecx   //%ecx=%eax+%ecx
+    28ac:	83 f8 0f             	cmp    $0xf,%eax   
+    28af:	75 f1                	jne    28a2 <phase_5+0x50>   //循环 当%eax==15时停止
+
+
+    28b1:	c7 04 24 0f 00 00 00 	movl   $0xf,(%rsp)       //将第一个数变为15
+    28b8:	83 fa 0f             	cmp    $0xf,%edx         //不能跳！！！！ 所以%edx==15 总共循环了15次
+    28bb:	75 06                	jne    28c3 <phase_5+0x71>
+    28bd:	39 4c 24 04          	cmp    %ecx,0x4(%rsp)    //必须跳 所以second==%ecx
+    28c1:	74 05                	je     28c8 <phase_5+0x76>
+    28c3:	e8 85 05 00 00       	call   2e4d <explode_bomb>
+    28c8:	48 8b 44 24 08       	mov    0x8(%rsp),%rax
+    28cd:	64 48 2b 04 25 28 00 	sub    %fs:0x28,%rax
+    28d4:	00 00 
+    28d6:	75 0c                	jne    28e4 <phase_5+0x92>
+    28d8:	48 83 c4 18          	add    $0x18,%rsp
+    28dc:	c3                   	ret    
+    28dd:	e8 6b 05 00 00       	call   2e4d <explode_bomb>
+    28e2:	eb 9f                	jmp    2883 <phase_5+0x31>
+    28e4:	e8 97 f9 ff ff       	call   2280 <__stack_chk_fail@plt>
+```
+```
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+aws=5 115
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+```
+
+
+
+## phase_6
+### 思路
+本题根据内置链表中的值对链表的index进行重排并构造了新链表，首先还是打印输入在290f
+发现要求输入6个整数，后面会检查，第一部检查是否输入了6个数，如不然则爆炸，第二步检查
+每一个输入的数是不是在1到6之间即x属于[0,6]，第三步进入循环Lable1，通过遍历每一个数的
+之前的所有数来保证这六个数互不相同，综上本题需要我们输入按一定顺序排好的1，2，3，4，5，6
+这六个数，然后汇编将一个地址加载进了%rdx，打印这个地址中的值发现这个地址周围有6个Node
+如下：
+```
+(gdb) x/20x 0x7230
+*0x7230 <node1>: 0x00000318      0x00000001      *0x00007240      0x00000000
+*0x7240 <node2>: 0x0000006e      0x00000002      *0x00007250      0x00000000
+*0x7250 <node3>: 0x00000048      0x00000003      *0x00007260      0x00000000
+*0x7260 <node4>: 0x00000042      0x00000004      *0x00007270      0x00000000
+*0x7270 <node5>: 0x0000005b      0x00000005      *0x00007110      0x00000000
+*0x7110 <node6>: 0x00000369      0x00000006      *0x00000000      0x00000000
+从大到小：6 1 2 5 3 4
+```
+观察加“*”的位置发现每一个内容都指向下一个的地址，于是发现这是一个链表结构，接下来
+2975到2992将链表第%eax个值（为双字）紧接着放到输入的数组后面的位置（32=4*6+8），
+其中8为stack的return adress地址，占8位。即取出了链表中所有的值,放到输入的数组后
+接下来2994到29c6重新按输入的六个数字的顺序重组链表，然后在29ce到29e6进行检查，
+检查条件在29e6，即链表中储存的前一个数大于后一个数即可安全返回，故对原链表中储存
+的数从大到小进行排序，从大到小：6 1 2 5 3 4，所以输入6 1 2 5 3 4即可
+```
+00000000000028e9 <phase_6>:
+    28e9:	f3 0f 1e fa          	endbr64 
+    28ed:	41 56                	push   %r14
+    28ef:	41 55                	push   %r13
+    28f1:	41 54                	push   %r12
+    28f3:	55                   	push   %rbp
+    28f4:	53                   	push   %rbx
+    28f5:	48 83 ec 60          	sub    $0x60,%rsp     //一个链表结构存3个值 分别为地址（8）内含值（4）和作为数字的下一个地址（4）共16位即0x10 总计6个数即0x60
+    28f9:	64 48 8b 04 25 28 00 	mov    %fs:0x28,%rax
+    2900:	00 00 
+    2902:	48 89 44 24 58       	mov    %rax,0x58(%rsp)  
+    2907:	31 c0                	xor    %eax,%eax        //%eax置零
+    2909:	49 89 e5             	mov    %rsp,%r13       //%r13=%rsp %r13被调用者保存，save %rsp
+    290c:	4c 89 ee             	mov    %r13,%rsi       //%rsi=%r13  将%rsp传入第二个参数 即%rsi=%rsp=数组首地址
+    290f:	e8 7b 05 00 00       	call   2e8f <read_six_numbers>   //输入六个数字
+    2914:	41 be 01 00 00 00    	mov    $0x1,%r14d     //%r14d=0x1 将%r14作为计数器，标记目前检查了多少输入
+    291a:	49 89 e4             	mov    %rsp,%r12      //%r12=%rsp %r12存输入的6个数的数组首地址
+    291d:	eb 28                	jmp    2947 <phase_6+0x5e>    jump to -> Lable1# 对输入进行检查
+
+    291f:	e8 29 05 00 00       	call   2e4d <explode_bomb>
+    2924:	eb 30                	jmp    2956 <phase_6+0x6d>
+
+********
+检查：新数字与前面的数均不相等，即每一个输入的数字必须不相同
+    2926:	48 83 c3 01          	add    $0x1,%rbx  //又检查了一个数%rbx+1
+    292a:	83 fb 05             	cmp    $0x5,%ebx  //是否已经检查了对于第六个数与前5个的输入均互不相同，如已经检查完毕则跳转
+    292d:	7f 10                	jg     293f <phase_6+0x56>
+********
+%r12存输入的6个数的数组首地址 %rbx为当前已经检查的数字的index %rbp为数组首地址
+Lable0#（检查输入的元素是否互不相等）:
+    292f:	41 8b 04 9c          	mov    (%r12,%rbx,4),%eax   //%eax=M[%r12+%rbx*4] 取出数组中当前index的要检查的数
+    2933:	39 45 00             	cmp    %eax,0x0(%rbp)
+    2936:	75 ee                	jne    2926 <phase_6+0x3d>   //必须跳  
+    2938:	e8 10 05 00 00       	call   2e4d <explode_bomb>
+    293d:	eb e7                	jmp    2926 <phase_6+0x3d>
+    293f:	49 83 c6 01          	add    $0x1,%r14   //检查了一个数与前面的数不相等
+    2943:	49 83 c5 04          	add    $0x4,%r13   //数组向后挪一个数
+
+*********
+Lable1#（这里是在检查每一个输入是否小于等于6）:
+    2947:	4c 89 ed             	mov    %r13,%rbp       //%rbp=%r13 即%rbp=%r13=数组首地址
+    294a:	41 8b 45 00          	mov    0x0(%r13),%eax    //输入的第一个数放到%eax
+    294e:	83 e8 01             	sub    $0x1,%eax      //%eax=x1-1
+    2951:	83 f8 05             	cmp    $0x5,%eax      
+    2954:	77 c9                	ja     291f <phase_6+0x36>   //不能跳！！！！所以%eax-5<=0 即first<=6
+
+    2956:	41 83 fe 05          	cmp    $0x5,%r14d   //检查计数器，检查目前已经检查了多少输入
+    295a:	7f 05                	jg     2961 <phase_6+0x78>   // jump if %r14-5>0
+
+    295c:	4c 89 f3             	mov    %r14,%rbx   //将%rbx赋值为%r14，赋值为当前已经检查的数字的index
+    295f:	eb ce                	jmp    292f <phase_6+0x46>   ->Lable0:
+
+    2961:	be 00 00 00 00       	mov    $0x0,%esi           //%esi=0 将%rsi置零
+
+*********************************************  
+按照输入的六个数字的顺序取出链表中所存放的值并将其存放到紧接着的数组后面的stack里
+%rsi=0用作index计数器  %rdx内存中链表的首地址    %ecx=M[4*%rsi+%rsp] 取数组中第%rsi个元素
+    2966:	8b 0c b4             	mov    (%rsp,%rsi,4),%ecx  //%ecx=M[4*%rsi+%rsp] 取数组中第%rsi个元素 
+    2969:	b8 01 00 00 00       	mov    $0x1,%eax           //%eax=1  链表index计数器？
+    296e:	48 8d 15 bb 48 00 00 	lea    0x48bb(%rip),%rdx        # 7230 <node1>  //将链表存入%rdx
+*******************
+(gdb) x/20x 0x7230
+*0x7230 <node1>: 0x00000318      0x00000001      *0x00007240      0x00000000
+*0x7240 <node2>: 0x0000006e      0x00000002      *0x00007250      0x00000000
+*0x7250 <node3>: 0x00000048      0x00000003      *0x00007260      0x00000000
+*0x7260 <node4>: 0x00000042      0x00000004      *0x00007270      0x00000000
+*0x7270 <node5>: 0x0000005b      0x00000005      *0x00007110      0x00000000
+*0x7110 <node6>: 0x00000369      0x00000006      *0x00000000      0x00000000
+从大到小：6 1 2 5 3 4
+************************************************************************************
+按链表内储存的数字大小排序
+%rsi=0用作index计数器  %rdx内存中链表的首地址%ecx=M[4*%rsi+%rsp] 取数组中第%rsi个元素.
+
+
+    2975:	83 f9 01             	cmp    $0x1,%ecx       //%ecx=M[4*%rsi+%rsp] 取数组中第%rsi个元素和1比较，如果小于等于1则跳转
+    2978:	7e 0b                	jle    2985 <phase_6+0x9c>  
+    297a:	48 8b 52 08          	mov    0x8(%rdx),%rdx     //取目前链表中的首个元素的值放到%rdx
+    297e:	83 c0 01             	add    $0x1,%eax          //%eax+=1  链表index计数器？
+    2981:	39 c8                	cmp    %ecx,%eax          //是否正确的取出了链表中的第%ecx个值
+    2983:	75 f5                	jne    297a <phase_6+0x91>  
+**********
+    2985:	48 89 54 f4 20       	mov    %rdx,0x20(%rsp,%rsi,8)   //M[%rsp+8*%rsi+32]=%rdx 将链表第%eax个值（为双字）紧接着放到输入的数组后面的位置（32=4*6+8），其中8为stack的return adress地址，占8位
+    298a:	48 83 c6 01          	add    $0x1,%rsi          //%rsi+=1 计数器加一
+    298e:	48 83 fe 06          	cmp    $0x6,%rsi          
+    2992:	75 d2                	jne    2966 <phase_6+0x7d>   //当计数器%rsi==6，即全部地址都取出后则结束循环
+************************************
+构建链表？
+%rsi=0用作index计数器  %rdx内存中链表的首地址    %ecx=M[4*%rsi+%rsp] 取数组中第%rsi个元素
+    2994:	48 8b 5c 24 20       	mov    0x20(%rsp),%rbx    //将对应数组第一个元素的index的链表元素放到%rbx
+    2999:	48 8b 44 24 28       	mov    0x28(%rsp),%rax    //对应输入数组第一个位置index的链表元素放到%rax
+    299e:	48 89 43 08          	mov    %rax,0x8(%rbx)     //将%rax放到%rbx的后边，向链表添加一个元素
+    29a2:	48 8b 54 24 30       	mov    0x30(%rsp),%rdx    //将对应数组第二个元素的index的链表元素放到%rdx
+    29a7:	48 89 50 08          	mov    %rdx,0x8(%rax)     //将%rdx接到%rax后面，向链表添加一个元素
+    29ab:	48 8b 44 24 38       	mov    0x38(%rsp),%rax    //将对应数组第三个元素的index的链表元素放到%rax
+    29b0:	48 89 42 08          	mov    %rax,0x8(%rdx)     //将%rax追加到%rdx后面，向链表添加一个元素
+    29b4:	48 8b 54 24 40       	mov    0x40(%rsp),%rdx    //将对应数组第四个元素的index的链表元素放到%rdx
+    29b9:	48 89 50 08          	mov    %rdx,0x8(%rax)     //将%rax追加到%rdx后面，向链表添加一个元素
+    29bd:	48 8b 44 24 48       	mov    0x48(%rsp),%rax    //将对应数组第四个元素的index的链表元素放到%rax
+    29c2:	48 89 42 08          	mov    %rax,0x8(%rdx)     //将%rax追加到%rdx后面，向链表添加一个元素
+    29c6:	48 c7 40 08 00 00 00 	movq   $0x0,0x8(%rax)      //新链表末尾放上0
+    29cd:	00 
+
+%rbx为对应数组第一个元素的index的链表元素
+
+    29ce:	bd 05 00 00 00       	mov    $0x5,%ebp          //%ebp=5 计数器？
+    29d3:	eb 09                	jmp    29de <phase_6+0xf5>
+
+    29d5:	48 8b 5b 08          	mov    0x8(%rbx),%rbx      //将新链表下一个元素放到%rbx
+    29d9:	83 ed 01             	sub    $0x1,%ebp          //计数器减一
+    29dc:	74 11                	je     29ef <phase_6+0x106>
+
+    29de:	48 8b 43 08          	mov    0x8(%rbx),%rax     //将新链表下一个元素放到%rax
+    29e2:	8b 00                	mov    (%rax),%eax        //%eax==%rax
+    29e4:	39 03                	cmp    %eax,(%rbx)        
+    29e6:	7d ed                	jge    29d5 <phase_6+0xec> //必须跳转！！！ 如果%rbx-%eax>=0，即当前元素比下一个元素大，则跳转
+
+    29e8:	e8 60 04 00 00       	call   2e4d <explode_bomb>
+    29ed:	eb e6                	jmp    29d5 <phase_6+0xec>
+
+    29ef:	48 8b 44 24 58       	mov    0x58(%rsp),%rax
+    29f4:	64 48 2b 04 25 28 00 	sub    %fs:0x28,%rax
+    29fb:	00 00 
+    29fd:	75 0d                	jne    2a0c <phase_6+0x123>
+    29ff:	48 83 c4 60          	add    $0x60,%rsp
+    2a03:	5b                   	pop    %rbx
+    2a04:	5d                   	pop    %rbp
+    2a05:	41 5c                	pop    %r12
+    2a07:	41 5d                	pop    %r13
+    2a09:	41 5e                	pop    %r14
+    2a0b:	c3                   	ret    
+    2a0c:	e8 6f f8 ff ff       	call   2280 <__stack_chk_fail@plt>
+```
+```
+~~~~~~~~~~~~~~~~~~~~~~~~~~
+aws=6 1 2 5 3 4
+~~~~~~~~~~~~~~~~~~~~~~~~~~
+```
+
+
+
+
+### 运行结果：
+```
+jovyan@jupyter-10224507041:~/lab2/bomb1$ ./bomb
+Welcome to my fiendish little bomb. You have 6 phases with
+which to blow yourself up. Have a nice day!
+There are rumors on the internets.
+Phase 1 defused. How about the next one?
+1 2 4 7 11 16
+That's number 2.  Keep going!
+0 746
+Halfway there!
+10 37
+So you got that one.  Try this one.
+5 115
+Good work!  On to the next...
+6 1 2 5 3 4
+Congratulations! You've defused the bomb!
+Your instructor has been notified and will verify your solution.
+```
