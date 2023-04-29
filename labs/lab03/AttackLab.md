@@ -3,6 +3,8 @@
 
 ### 提交命令
 ./hex2raw < testtouch.txt | ./ctarget -q
+
+
 ./hex2raw < testtouch.txt | ./rtarget -q
 
 ```
