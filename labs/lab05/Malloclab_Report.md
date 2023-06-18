@@ -515,6 +515,6 @@ static void place(void* bp,size_t asize)
 测试命令：依次输入`make`,`./mdriver -t traces -V`，并且请确保traces文件夹在malloclab-hanout文件夹目录下。
 
 结果如下：
-
+![](./picture/result.png)
 
 
