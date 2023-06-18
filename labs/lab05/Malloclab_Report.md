@@ -516,6 +516,6 @@ static void place(void* bp,size_t asize)
 
 结果如下：
 
-![](./picture/result.png)
+![截图](./picture/result.png)
 
 
