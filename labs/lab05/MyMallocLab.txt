@@ -1,0 +1,382 @@
+/*
+ * mm-naive.c - The fastest, least memory-efficient malloc package.
+ * 
+ * In this naive approach, a block is allocated by simply incrementing
+ * the brk pointer.  A block is pure payload. There are no headers or
+ * footers.  Blocks are never coalesced or reused. Realloc is
+ * implemented directly using mm_malloc and mm_free.
+ *
+ * NOTE TO STUDENTS: Replace this header comment with your own header
+ * comment that gives a high level description of your solution.
+ */
+#include <stdio.h>
+#include <stdlib.h>
+#include <assert.h>
+#include <unistd.h>
+#include <string.h>
+
+#include "mm.h"
+#include "memlib.h"
+
+/*********************************************************
+ * NOTE TO STUDENTS: Before you do anything else, please
+ * provide your team information in the following struct.
+ ********************************************************/
+team_t team = {
+    /* Team name */
+    "ateam",
+    /* First member's full name */
+    "Harry Bovik",
+    /* First member's email address */
+    "bovik@cs.cmu.edu",
+    /* Second member's full name (leave blank if none) */
+    "",
+    /* Second member's email address (leave blank if none) */
+    ""
+};
+
+//参数
+/* single word (4) or double word (8) alignment */
+#define ALIGNMENT 8
+#define WSIZE 4
+#define DSIZE 8
+#define ALIGNMENT 8 //指定了内存对齐的因子，在分配内存时，每个地址必须为 8 的倍数
+#define INITSIZE 16 //在添加第一个空闲块之前，空闲列表的初始大小
+#define MINBLOCKSIZE 16 
+/* 空闲块的最小大小，包括 4 个字节的头部/尾部和用于前一个和后一个
+空闲块两个指针的有效负载内的空间 ，假设32位地址*/
+
+//宏
+/* rounds up to the nearest multiple of ALIGNMENT */
+#define ALIGN(size) (((size) + (ALIGNMENT-1)) & ~0x7)
+//表示对于一个给定的size，按照ALIGNMENT对齐方式进行对齐，并返回对齐后的结果。
+//以ALIGNMENT为8的情况为例，假设size为12，则按照上述宏定义计算得到的对齐后的结果为16。具体地，先将size和(ALIGNMENT-1)进行相加，即12+7=19。19是8的倍数，且大于等于12，因此最小的对齐后的值就是16。最后再用~0x7将16的最后3位清零，即得到了最终的对齐后的结果16。这种对齐方式可以保证内存分配的块都是8字节对齐的，从而提高程序的性能表现。
+
+#define SIZE_T_SIZE (ALIGN(sizeof(size_t)))
+#define CHUNKSIZE (1<<12)
+#define MAX(x,y) ((x)>(y)?(x):(y))
+
+#define PACK(size,alloc) ((size)|(alloc))
+//接受两个参数 size 和 alloc，将它们合并为一个双字（8字节）大小的值，并返回该值。size 所代表的整数值作为内存块的大小，而 alloc 代表是否分配（即是否被标记为已使用）。
+
+//对内存中二进制数据的读写操作,4 个字节（32位）
+#define GET(p) (*(size_t *)(p))
+#define PUT(p,val) (*(size_t *)(p)=(val))
+
+#define GET_SIZE(p) (GET(p) & ~0x1) //指针 p 所指向的内存块的大小
+#define GET_ALLOC(p) (GET(p) & 0x1) //获取指针 p 所指向的内存块是否已经分配
+
+#define HDRP(bp) ((char *)(bp)-WSIZE) //返回指针 bp 所指向的内存块的头部位置
+#define FTRP(bp) ((char *)(bp)+GET_SIZE(HDRP(bp))-DSIZE) //返回指针 bp 所指向的内存块的尾部位置
+
+//获取指针 bp 所指向的内存块的前一个和后一个内存块的位置
+#define NEXT_BLKP(bp) ((char *)(bp)+GET_SIZE(((char *)(bp)-WSIZE)))
+#define PREV_BLKP(bp) ((char *)(bp)-GET_SIZE(((char *)(bp)-DSIZE)))
+
+#define NEXT_FREE(bp)(*(void**)(bp))
+#define PREV_FREE(bp)(*(void**)(bp+WSIZE))
+
+//原型
+static void *extend_heap(size_t words);
+static void *find_fit(size_t size);
+static void *coalesce(void *bp);
+static void place(void *bp,size_t asize);
+static void remove_freeblock(void *bp);
+
+static char* heap_listp=0;//指向堆起始地址的指针
+static char* free_listp=0;//指向空闲列表第一个空闲块的指针
+
+
+/* 
+ * mm_init - 初始化malloc.
+ */
+int mm_init(void)
+{
+    if((heap_listp=mem_sbrk(INITSIZE+MINBLOCKSIZE))==(void *)-1)
+       {
+           return -1;
+       }
+    PUT(heap_listp,PACK(MINBLOCKSIZE,1)); // 序言块
+    PUT(heap_listp+WSIZE,PACK(MINBLOCKSIZE,0)); // 空闲块头部脚注 
+    
+    PUT(heap_listp+2*WSIZE,PACK(0,0));// 用于储存向后指的指针
+    PUT(heap_listp+3*WSIZE,PACK(0,0));// 用于储存向前指的指针
+    
+    PUT(heap_listp+4*WSIZE,PACK(MINBLOCKSIZE,1));// 空闲块尾部脚注
+    PUT(heap_listp+5*WSIZE,PACK(0,1));// 结尾块
+        
+    free_listp=heap_listp+WSIZE;
+    
+    return 0;
+}
+
+/* 
+ * mm_malloc - 通过增加 brk 指针来分配一个块。
+ *     总是分配大小为对齐要求的数的倍数的块。
+ */
+void *mm_malloc(size_t size)
+{
+    if(size==0)
+    {
+        return NULL;
+    }
+    size_t asize;
+    size_t extendsize;
+    char* bp;
+    /* 新块的大小等于头部和尾部的大小加上有效载荷的大小
+   如果请求的大小更小，则为 MINBLOCKSIZE。*/
+    asize=MAX(ALIGN(size)+DSIZE,MINBLOCKSIZE);
+    
+    // 在空闲块链表中查找合适的块
+    if((bp=find_fit(asize)))
+    {
+        place(bp,asize);
+        return bp;
+    }
+    
+    // 否则，若没有找到合适的空闲块。需要增大堆的大小。
+    extendsize=MAX(asize,MINBLOCKSIZE);
+    if((bp=extend_heap(extendsize/WSIZE))==NULL)
+        return NULL;
+    
+    // 放置新分配的内存块。
+    place(bp,asize);
+    
+    return bp;
+}
+
+
+/*
+ * mm_free - 释放块
+ */
+void mm_free(void *bp)
+{
+    if(!bp)
+        return;
+    size_t size=GET_SIZE(HDRP(bp));
+    /*  将头部和尾部的已分配位设置为0，从而释放该块内存 */
+    PUT(HDRP(bp),PACK(size,0));
+    PUT(FTRP(bp),PACK(size,0));
+    
+    //合并相邻的空闲块，并将它们添加到空闲链表中
+    coalesce(bp);
+}
+
+
+
+/*
+ * mm_realloc - 通过 mm_malloc 和 mm_free 实现
+ */
+void *mm_realloc(void *ptr, size_t size)
+{
+    if(ptr==NULL)
+        return mm_malloc(size);
+    if(size==0)
+    {
+        mm_free(ptr);
+        return NULL;
+    }
+    size_t asize=MAX(ALIGN(size)+DSIZE,MINBLOCKSIZE);
+    size_t current_size=GET_SIZE(HDRP(ptr));
+    
+    void *bp;
+    char* next=HDRP(NEXT_BLKP(ptr));
+    size_t newsize=current_size+GET_SIZE(next);
+    
+    // 情况1：大小等于当前有效负载大小 
+    if(asize==current_size)
+        return ptr;
+    
+    //情况2：大小小于当前有效负载大小
+    if(asize<=current_size)
+    {
+        if(asize>MINBLOCKSIZE && (current_size-asize)>MINBLOCKSIZE)
+        {
+        PUT(HDRP(ptr),PACK(asize,1));
+        PUT(FTRP(ptr),PACK(asize,1));
+        bp=NEXT_BLKP(ptr);
+        PUT(HDRP(bp),PACK(current_size-asize,1));
+        PUT(FTRP(bp),PACK(current_size-asize,1));
+        mm_free(bp);
+        return ptr;
+        }
+        
+        bp=mm_malloc(asize);
+        memcpy(bp,ptr,asize);
+        mm_free(ptr);
+        return bp;
+    }
+    
+    // 情况3：请求的大小大于当前有效负载大小
+    else
+    {
+        if(!GET_ALLOC(next) && newsize>=asize)
+        {
+            remove_freeblock(NEXT_BLKP(ptr));
+            PUT(HDRP(ptr),PACK(asize,1));
+            PUT(FTRP(ptr),PACK(asize,1));
+            bp=NEXT_BLKP(ptr);
+            PUT(HDRP(bp),PACK(newsize-asize,1));
+            PUT(FTRP(bp),PACK(newsize-asize,1));
+            mm_free(bp);
+            return ptr;
+        }
+        
+        // 否则分配一个新的所请求大小的内存块，并释放当前内存块
+        bp=mm_malloc(asize);
+        memcpy(bp,ptr,current_size);
+        mm_free(ptr);
+        return bp;
+    }
+    
+}
+
+/*
+ * extend_heap -  将堆扩展给定数量的字（向上取整为最接近的偶数）
+ */
+        
+static void *extend_heap(size_t words)
+        {
+            char * bp;
+            size_t asize;
+            //调整大小以满足对齐和最小块大小要求 
+            asize=(words%2)?(words+1)*WSIZE:words*WSIZE;
+            if(asize<MINBLOCKSIZE)
+                asize=MINBLOCKSIZE;
+            
+            // 尝试通过调整后的大小扩展堆
+            if((bp=mem_sbrk(asize))==(void*)-1)
+                return NULL;
+            
+            /* 设置新创建的空闲块的头脚注和尾脚注，并将结尾块推到后面*/
+            PUT(HDRP(bp),PACK(asize,0));
+            PUT(FTRP(bp),PACK(asize,0));
+            PUT(HDRP(NEXT_BLKP(bp)),PACK(0,1));/* Move the epilogue to the end */
+                
+             // 合并空闲块
+            return coalesce(bp);
+        }
+
+/*
+ * find_fit - 尝试在空闲列表中查找至少给定大小的空闲块
+ */        
+
+static void* find_fit(size_t size)    
+        {
+            // 搜索策略：First-fit search
+            void* bp;
+            
+            //遍历空闲块链表并尝试找到足够大的空闲块
+            for(bp=free_listp;GET_ALLOC(HDRP(bp))==0;bp=NEXT_FREE(bp))
+            {
+                if(size<=GET_SIZE(HDRP(bp)))
+                    return bp;
+            }
+            //否则说明没有足够大的空闲块
+            return NULL;
+        }
+             
+/*
+ * remove_freeblock - 从空闲块链表中移除指定的空闲块。
+ */
+        
+static void remove_freeblock(void* bp)
+        {
+            if(bp)
+            {
+                if(PREV_FREE(bp))
+                    NEXT_FREE(PREV_FREE(bp))=NEXT_FREE(bp);
+                else
+                    free_listp=NEXT_FREE(bp);
+                if(NEXT_FREE(bp)!=NULL)
+                    PREV_FREE(NEXT_FREE(bp))=PREV_FREE(bp);
+            }
+        }
+                    
+/*
+ * coalesce - 使用边界标记策略合并块 bp 周围的内存
+ * 在教材中 (596页,9.9.11节).
+ * 该函数会将相邻的空闲块合并在一起，并将合并后的大块添加到空闲块链表中。同时，还会从空闲块链表中移除被合并的块
+ */
+static void* coalesce(void* bp)        
+        {
+            // 确定前一个和后一个块的当前分配状态
+            size_t prev_alloc=GET_ALLOC(FTRP(PREV_BLKP(bp)))|| PREV_BLKP(bp)==bp;
+            size_t next_alloc=GET_ALLOC(HDRP(NEXT_BLKP(bp)));
+            
+            // 获取当前空闲块的大小
+            size_t size=GET_SIZE(HDRP(bp));
+            
+            //如果下一个块是空闲的，则合并当前块（bp）和下一个块
+            // 情况 2 (教材中)
+            if(prev_alloc && !next_alloc)
+            {
+                size+=GET_SIZE(HDRP(NEXT_BLKP(bp)));
+                remove_freeblock(NEXT_BLKP(bp));
+                PUT(HDRP(bp),PACK(size,0));
+                PUT(FTRP(bp),PACK(size,0));
+            }
+            
+            //如果前一个块是空闲的，则合并当前块（bp）和前一个块
+            // 情况 3 (教材中)
+            else if(!prev_alloc && next_alloc)
+            {
+                size+=GET_SIZE(HDRP(PREV_BLKP(bp)));
+                bp=PREV_BLKP(bp);
+                remove_freeblock(bp);
+                PUT(HDRP(bp),PACK(size,0));
+                PUT(FTRP(bp),PACK(size,0));
+            }
+            
+            //如果前一个块和下一个块都是空闲的，则合并它们两个
+            // 情况 4 (教材中) 
+            else if(!prev_alloc && !next_alloc)
+            {
+                size+=GET_SIZE(HDRP(PREV_BLKP(bp)))+GET_SIZE(HDRP(NEXT_BLKP(bp)));
+                remove_freeblock(PREV_BLKP(bp));
+                remove_freeblock(NEXT_BLKP(bp));
+                bp=PREV_BLKP(bp);
+                PUT(HDRP(bp),PACK(size,0));
+                PUT(FTRP(bp),PACK(size,0));
+            }
+            
+            // 将合并后的空闲块插入到空闲块链表的前面
+            NEXT_FREE(bp)=free_listp;
+            PREV_FREE(free_listp)=bp;
+            PREV_FREE(bp)=NULL;
+            free_listp=bp;
+            
+            return bp;
+        }
+        
+     /*
+     * place - 在给定的空闲块（由指针bp指向）中分配给定大小的内存块
+     *
+     * 这种分配是使用拆分策略完成的。如果要分配的块的大小（asize）与空闲块的总大小（fsize）之间的差大于或等于最小块大小，
+     * 则将该块拆分成两个部分。第一个块是大小为asize的已分配块，第二个块是剩余的空闲块，其大小对应于两个块大小之间的差
+     */
+static void place(void* bp,size_t asize)
+        {
+            // 获取空闲块的总大小
+            size_t fsize=GET_SIZE(HDRP(bp));
+            
+            //获取空闲块的总大小
+            if(fsize-asize>=MINBLOCKSIZE)
+            {
+                PUT(HDRP(bp),PACK(asize,1));
+                PUT(FTRP(bp),PACK(asize,1));
+                remove_freeblock(bp);
+                bp=NEXT_BLKP(bp);
+                PUT(HDRP(bp),PACK(fsize-asize,0));
+                PUT(FTRP(bp),PACK(fsize-asize,0));
+                coalesce(bp);
+            }
+            
+            else
+            {
+            // 情况2: 无法进行拆分操作，使用完整的空闲块
+            PUT(HDRP(bp),PACK(fsize,1));
+            PUT(FTRP(bp),PACK(fsize,1));
+            remove_freeblock(bp);
+            }
+        }
